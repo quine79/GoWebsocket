@@ -3,10 +3,12 @@ package gowebsocket
 import (
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	logging "github.com/sacOO7/go-logger"
@@ -39,7 +41,8 @@ type Socket struct {
 	OnPingReceived    func(data string, socket Socket)
 	OnPongReceived    func(data string, socket Socket)
 	IsConnected       bool
-	sendMu            *sync.Mutex // Prevent "concurrent write to websocket connection"
+	connMu            *sync.Mutex
+	sendMu            *sync.Mutex
 	receiveMu         *sync.Mutex
 }
 
@@ -63,6 +66,7 @@ func New(url string) Socket {
 			UseSSL:         true,
 		},
 		WebsocketDialer: &websocket.Dialer{},
+		connMu:          &sync.Mutex{},
 		sendMu:          &sync.Mutex{},
 		receiveMu:       &sync.Mutex{},
 	}
@@ -78,6 +82,9 @@ func (socket *Socket) setConnectionOptions() {
 func (socket *Socket) Connect() {
 	var err error
 	socket.setConnectionOptions()
+
+	socket.connMu.Lock()
+	defer socket.connMu.Lock()
 
 	socket.Conn, _, err = socket.WebsocketDialer.Dial(socket.Url, socket.RequestHeader)
 
@@ -128,8 +135,17 @@ func (socket *Socket) Connect() {
 
 	go func() {
 		for {
+			socket.connMu.Lock()
+			conn := socket.Conn
+			socket.connMu.Unlock()
+
+			if conn == nil {
+				time.Sleep(time.Second)
+				continue
+			}
+
 			socket.receiveMu.Lock()
-			messageType, message, err := socket.Conn.ReadMessage()
+			messageType, message, err := conn.ReadMessage()
 			socket.receiveMu.Unlock()
 			if err != nil {
 				logger.Error.Println("read:", err)
@@ -176,10 +192,18 @@ func (socket *Socket) SendBinary(data []byte) {
 }
 
 func (socket *Socket) send(messageType int, data []byte) error {
-	socket.sendMu.Lock()
-	err := socket.Conn.WriteMessage(messageType, data)
-	socket.sendMu.Unlock()
-	return err
+	socket.connMu.Lock()
+	conn := socket.Conn
+	socket.connMu.Unlock()
+
+	if conn != nil {
+		socket.sendMu.Lock()
+		err := socket.Conn.WriteMessage(messageType, data)
+		socket.sendMu.Unlock()
+		return err
+	}
+
+	return fmt.Errorf("could not get connection object")
 }
 
 func (socket *Socket) Close() {
