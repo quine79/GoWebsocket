@@ -84,7 +84,7 @@ func (socket *Socket) Connect() {
 	socket.setConnectionOptions()
 
 	socket.connMu.Lock()
-	defer socket.connMu.Lock()
+	defer socket.connMu.Unlock()
 
 	socket.Conn, _, err = socket.WebsocketDialer.Dial(socket.Url, socket.RequestHeader)
 
