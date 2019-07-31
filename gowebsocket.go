@@ -99,8 +99,8 @@ func (socket *Socket) Connect() {
 
 	logger.Info.Println("Connected to server")
 
+	socket.IsConnected = true
 	if socket.OnConnected != nil {
-		socket.IsConnected = true
 		socket.OnConnected(*socket)
 	}
 
@@ -126,8 +126,8 @@ func (socket *Socket) Connect() {
 	socket.Conn.SetCloseHandler(func(code int, text string) error {
 		result := defaultCloseHandler(code, text)
 		logger.Warning.Println("Disconnected from server ", result)
+		socket.IsConnected = false
 		if socket.OnDisconnected != nil {
-			socket.IsConnected = false
 			socket.OnDisconnected(errors.New(text), *socket)
 		}
 		return result
@@ -149,6 +149,7 @@ func (socket *Socket) Connect() {
 			socket.receiveMu.Unlock()
 			if err != nil {
 				logger.Error.Println("read:", err)
+				socket.setDisconnected(err)
 				return
 			}
 			logger.Info.Println("recv: %s", message)
@@ -167,10 +168,18 @@ func (socket *Socket) Connect() {
 	}()
 }
 
+func (socket *Socket) setDisconnected(err error) {
+	socket.IsConnected = false
+	if socket.OnDisconnected != nil {
+		socket.OnDisconnected(err, *socket)
+	}
+}
+
 func (socket *Socket) SendPing() {
 	err := socket.send(websocket.PingMessage, []byte(""))
 	if err != nil {
 		logger.Error.Println("write:", err)
+		socket.setDisconnected(err)
 		return
 	}
 }
@@ -179,6 +188,7 @@ func (socket *Socket) SendText(message string) {
 	err := socket.send(websocket.TextMessage, []byte(message))
 	if err != nil {
 		logger.Error.Println("write:", err)
+		socket.setDisconnected(err)
 		return
 	}
 }
@@ -187,6 +197,7 @@ func (socket *Socket) SendBinary(data []byte) {
 	err := socket.send(websocket.BinaryMessage, data)
 	if err != nil {
 		logger.Error.Println("write:", err)
+		socket.setDisconnected(err)
 		return
 	}
 }
@@ -212,8 +223,8 @@ func (socket *Socket) Close() {
 		logger.Error.Println("write close:", err)
 	}
 	socket.Conn.Close()
+	socket.IsConnected = false
 	if socket.OnDisconnected != nil {
-		socket.IsConnected = false
 		socket.OnDisconnected(err, *socket)
 	}
 }
